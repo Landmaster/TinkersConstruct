@@ -1,13 +1,21 @@
 package slimeknights.tconstruct.tools;
 
+import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Lists;
 import com.google.common.eventbus.Subscribe;
 
 import net.minecraft.entity.EnumCreatureAttribute;
+import net.minecraft.entity.monster.EntityCreeper;
+import net.minecraft.entity.monster.EntitySkeleton;
+import net.minecraft.entity.monster.EntityWitherSkeleton;
+import net.minecraft.entity.monster.EntityZombie;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.init.Blocks;
 import net.minecraft.init.Items;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTUtil;
 import net.minecraft.potion.Potion;
 import net.minecraftforge.event.RegistryEvent.Register;
 import net.minecraftforge.fml.common.SidedProxy;
@@ -21,7 +29,6 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-
 import slimeknights.mantle.pulsar.pulse.Pulse;
 import slimeknights.mantle.util.RecipeMatch;
 import slimeknights.tconstruct.common.CommonProxy;
@@ -122,6 +129,7 @@ public class TinkerModifiers extends AbstractToolPulse {
   public void postInit(FMLPostInitializationEvent event) {
     registerFortifyModifiers();
     registerExtraTraitModifiers();
+    registerMobHeadDrops();
   }
 
   protected void registerModifiers() {
@@ -216,7 +224,22 @@ public class TinkerModifiers extends AbstractToolPulse {
     }
   }
 
-  private Map<Collection<ITrait>, ModExtraTrait> extraTraitLookup = new HashMap<>();
+  private void registerMobHeadDrops() {
+    TinkerRegistry.registerHeadDrop(EntitySkeleton.class, new ItemStack(Items.SKULL, 1, 0));
+    TinkerRegistry.registerHeadDrop(EntityWitherSkeleton.class, new ItemStack(Items.SKULL, 1, 1));
+    TinkerRegistry.registerHeadDrop(EntityZombie.class, new ItemStack(Items.SKULL, 1, 2));
+    TinkerRegistry.registerHeadDrop(EntityCreeper.class, new ItemStack(Items.SKULL, 1, 4));
+    // EntityPlayerMP is the one that shows in the living drop event rather than EntityPlayer
+    TinkerRegistry.registerHeadDrop(EntityPlayerMP.class, (entity) -> {
+      ItemStack head = new ItemStack(Items.SKULL, 1, 3);
+      if(entity instanceof EntityPlayer) {
+        NBTUtil.writeGameProfile(head.getOrCreateSubCompound("SkullOwner"), ((EntityPlayer) entity).getGameProfile());
+      }
+      return head;
+    });
+  }
+
+  private Map<String, ModExtraTrait> extraTraitLookup = new HashMap<>();
 
   private void registerExtraTraitModifiers() {
     TinkerRegistry.getAllMaterials().forEach(this::registerExtraTraitModifiers);
@@ -239,7 +262,10 @@ public class TinkerModifiers extends AbstractToolPulse {
     if(toolPart instanceof Item) {
       Collection<ITrait> traits = partMaterialType.getApplicableTraitsForMaterial(material);
       if(!traits.isEmpty()) {
-        ModExtraTrait mod = extraTraitLookup.computeIfAbsent(traits, traits2 -> new ModExtraTrait(material, traits2));
+        // we turn it into a set to remove duplicates, reducing the total amount of modifiers created by roughly 25%!
+        final Collection<ITrait> traits2 = ImmutableSet.copyOf(traits);
+        String identifier = ModExtraTrait.generateIdentifier(material, traits2);
+        ModExtraTrait mod = extraTraitLookup.computeIfAbsent(identifier, id -> new ModExtraTrait(material, traits2, identifier));
         mod.addCombination(tool, (T) toolPart);
       }
     }

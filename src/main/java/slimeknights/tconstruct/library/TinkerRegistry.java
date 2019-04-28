@@ -14,6 +14,7 @@ import gnu.trove.set.hash.TLinkedHashSet;
 import net.minecraft.block.Block;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityList;
+import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.init.Blocks;
 import net.minecraft.init.Items;
 import net.minecraft.item.Item;
@@ -38,6 +39,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import slimeknights.mantle.client.CreativeTab;
@@ -456,6 +458,7 @@ public final class TinkerRegistry {
   | Modifiers                                                                 |
   ---------------------------------------------------------------------------*/
   private static final Map<String, IModifier> modifiers = new THashMap<>();
+  private static final Map<Class<? extends EntityLivingBase>, Function<EntityLivingBase,ItemStack>> headDrops = new THashMap<>();
 
   public static void registerModifier(IModifier modifier) {
     registerModifierAlias(modifier, modifier.getIdentifier());
@@ -463,6 +466,9 @@ public final class TinkerRegistry {
 
   /** Registers an alternate name for a modifier. This is used for multi-level modifiers/traits where multiple exist, but one specific is needed for access */
   public static void registerModifierAlias(IModifier modifier, String alias) {
+    if(modifiers.containsKey(alias)) {
+      throw new TinkerAPIException("Trying to register a modifier with the name " + alias + " but it already is registered");
+    }
     if(new TinkerRegisterEvent.ModifierRegisterEvent(modifier).fire()) {
       modifiers.put(alias, modifier);
     }
@@ -477,6 +483,38 @@ public final class TinkerRegistry {
 
   public static Collection<IModifier> getAllModifiers() {
     return ImmutableList.copyOf(modifiers.values());
+  }
+
+  /**
+   * Registers a beheading head drop for an entity
+   * @param clazz     Entity class
+   * @param callback  Callback function, takes entity as a parameter and returns an item stack
+   */
+  public static void registerHeadDrop(Class<? extends EntityLivingBase> clazz, Function<EntityLivingBase,ItemStack> callback) {
+    headDrops.put(clazz, callback);
+  }
+
+  /**
+   * Registers a beheading head drop for an entity
+   * @param clazz  Entity class
+   * @param head   Head that drops from that entity
+   */
+  public static void registerHeadDrop(Class<? extends EntityLivingBase> clazz, ItemStack head) {
+    final ItemStack safeStack = head.copy();
+    registerHeadDrop(clazz, (e) -> safeStack);
+  }
+
+  /**
+   * Gets the head that would be dropped by an entity
+   * @param entity  Entity to check
+   * @return  The entity's head
+   */
+  public static ItemStack getHeadDrop(EntityLivingBase entity) {
+    Function<EntityLivingBase, ItemStack> callback = headDrops.get(entity.getClass());
+    if(callback != null) {
+      return callback.apply(entity).copy();
+    }
+    return ItemStack.EMPTY;
   }
 
   /*---------------------------------------------------------------------------
@@ -723,7 +761,11 @@ public final class TinkerRegistry {
 
   public static FluidStack getMeltingForEntity(Entity entity) {
     ResourceLocation name = EntityList.getKey(entity);
-    return entityMeltingRegistry.get(name);
+    FluidStack fluidStack = entityMeltingRegistry.get(name);
+    // check if the fluid is the correct one to use
+    return Optional.ofNullable(fluidStack)
+                   .map(slimeknights.tconstruct.library.utils.FluidUtil::getValidFluidStackOrNull)
+                   .orElse(null);
   }
 
   /*---------------------------------------------------------------------------
@@ -815,7 +857,7 @@ public final class TinkerRegistry {
     addDryingRecipe(new DryingRecipe(new RecipeMatch.Oredict(oredict, 1), output, time));
   }
 
-  private static void addDryingRecipe(DryingRecipe recipe) {
+  public static void addDryingRecipe(DryingRecipe recipe) {
     if(new TinkerRegisterEvent.DryingRackRegisterEvent(recipe).fire()) {
       dryingRegistry.add(recipe);
     }
